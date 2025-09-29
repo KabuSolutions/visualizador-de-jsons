@@ -197,7 +197,7 @@
         }
 
         /**
-         * Abre uma nova modal com a tabela para os dados aninhados.
+         * Abre uma nova modal com a tabela para os dados aninhados (Objetos/Arrays).
          * @param {string} jsonString - O JSON aninhado (stringificada e URI encoded) para a nova tabela.
          * @param {string} title - O título da modal.
          */
@@ -259,6 +259,43 @@
             `;
 
             // 4. Inserir no DOM e atualizar a pilha
+            document.getElementById('modal-stack').insertAdjacentHTML('beforeend', modalHtml);
+            modalStack.push(newId);
+        }
+
+        /**
+         * Abre uma modal dedicada para inspecionar o conteúdo completo de uma string longa.
+         * @param {string} encodedText - O texto completo codificado em URI.
+         * @param {string} title - O título da modal.
+         */
+        function openTextModal(encodedText, title) {
+            const fullText = decodeURIComponent(encodedText);
+            
+            // Gera ID e Z-Index para a nova modal (certificando-se de que esteja no topo)
+            const newId = `modal-text-${modalStack.length}-${Date.now()}`;
+            const zIndex = 60 + modalStack.length * 10;
+
+            const modalHtml = `
+                <div id="${newId}" class="modal-overlay fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center p-4" style="z-index: ${zIndex};">
+                    <div class="bg-gray-800 rounded-xl shadow-2xl max-w-xl w-full max-h-[90vh] overflow-hidden flex flex-col relative">
+                        
+                        <!-- Modal Header -->
+                        <div class="flex justify-between items-center p-4 bg-gray-700 rounded-t-xl border-b border-gray-600">
+                            <h2 class="text-xl font-bold text-white truncate">${title}</h2>
+                            <button onclick="closeModal('${newId}')" class="text-gray-300 hover:text-white transition p-2 rounded-full hover:bg-gray-600">
+                                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                            </button>
+                        </div>
+
+                        <!-- Modal Body (Text Content) -->
+                        <div class="p-4 flex-grow overflow-y-auto">
+                            <textarea readonly rows="15" class="w-full h-full p-3 text-sm bg-gray-900 text-gray-200 border border-gray-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 resize-none">${fullText}</textarea>
+                            <p class="text-xs text-gray-500 mt-2">Conteúdo completo do campo, apenas para leitura.</p>
+                        </div>
+                    </div>
+                </div>
+            `;
+
             document.getElementById('modal-stack').insertAdjacentHTML('beforeend', modalHtml);
             modalStack.push(newId);
         }
@@ -428,10 +465,38 @@
                     } else {
                         // Valores simples (string, number)
                         let displayValue = String(value);
-                        if (displayValue.length > 50) {
-                            displayValue = displayValue.substring(0, 47) + '...';
+                        const originalValue = displayValue;
+                        const MAX_LENGTH = 50;
+                        let isTruncated = false;
+                        
+                        if (displayValue.length > MAX_LENGTH) {
+                            // Trunca o texto
+                            displayValue = displayValue.substring(0, MAX_LENGTH - 3) + '...';
+                            isTruncated = true;
                         }
-                        displayContent = displayValue;
+
+                        if (isTruncated) {
+                            // Encodifica o texto completo para passar para a modal de inspeção
+                            const encodedText = encodeURIComponent(originalValue);
+                            const titleText = `Inspeção de Conteúdo: ${header}`;
+
+                            displayContent = `
+                                <div onclick="openTextModal('${encodedText}', '${titleText}')" 
+                                    class="group relative cursor-pointer hover:text-blue-400 transition duration-150">
+                                    
+                                    <!-- Display Truncated Text -->
+                                    <span class="truncate block max-w-full">${displayValue}</span>
+
+                                    <!-- Tooltip (Dica) for inspection (AGORA ACIMA E CENTRALIZADO) -->
+                                    <div class="absolute z-40 bottom-full left-1/2 -translate-x-1/2 mb-1 w-max max-w-xs px-2 py-1 bg-gray-600 text-xs text-white rounded opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none shadow-lg whitespace-nowrap">
+                                        Clique para Inspecionar
+                                    </div>
+                                </div>
+                            `;
+                            cellClass += ' max-w-sm'; // Mantém o max width na célula
+                        } else {
+                            displayContent = originalValue;
+                        }
                     }
                     
                     tableHtml += `<td class="${cellClass}"><div class="max-w-md">${displayContent}</div></td>`;
@@ -452,17 +517,17 @@
     <div class="p-8 flex-grow">
         <div class="max-w-6xl mx-auto">
             <h1 class="text-4xl font-extrabold text-white mb-6 text-center">
-                Conversor JSON para Tabela (Visualização Recursiva por Modal)
+                Conversor JSON para Tabela (Visualização Recursiva)
             </h1>
             <p class="text-gray-400 mb-8 text-center">
-                Cole o seu JSON. Objetos e listas aninhados abrem uma nova janela (modal) com sua própria tabela, permitindo a navegação em profundidade. As modais agora podem ser **redimensionadas em todas as 8 direções**.
+                Cole o seu JSON. Campos de texto longos podem ser inspecionados clicando-se na célula truncada.
             </p>
 
             <!-- Área de Input e Ação -->
             <div class="bg-gray-700 p-6 rounded-xl shadow-lg mb-6">
                 <textarea id="json-input" rows="10" 
                         class="w-full p-4 bg-gray-900 text-gray-200 border border-gray-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 transition duration-150"
-                        placeholder='Cole seu JSON aqui. Ex: [{"id": 1, "nome": "Luan", "pedidos": [{"item": "café", "qnt": 2, "detalhes": {"origem": "BR"}}, {"item": "pão", "qnt": 1}]}]'></textarea>
+                        placeholder='Cole seu JSON aqui. Ex: [{"id": 1, "nome": "Cabra", "descricao": "beeeeeeh", "pedidos": [{"item": "chifre", "qnt": 2}]}]'></textarea>
                 
                 <button id="process-button" 
                         class="mt-4 w-full sm:w-auto px-6 py-3 text-lg font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-md transition duration-200 transform hover:scale-[1.01] focus:outline-none focus:ring-4 focus:ring-blue-500 focus:ring-opacity-50">
