@@ -92,7 +92,8 @@
             currentModalContent.style.position = 'fixed';
             
             // Remover classes de layout dinâmico
-            currentModalContent.classList.remove('max-w-4xl', 'w-full', 'max-h-[90vh]');
+            // Nota: O max-w-6xl é removido aqui, mas as dimensões fixas serão aplicadas abaixo.
+            currentModalContent.classList.remove('max-w-6xl', 'w-full', 'max-h-[90vh]');
 
             // 3. Capturar estados iniciais (posição e dimensões)
             startX = e.clientX;
@@ -224,9 +225,10 @@
             const tableContent = generateTableHtml(dataToRender, newId);
 
             // 3. Criar o HTML completo da Modal
+            // Alterado de max-w-4xl para max-w-6xl para aumentar o tamanho inicial da modal
             const modalHtml = `
                 <div id="${newId}" class="modal-overlay fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center p-4" style="z-index: ${zIndex};">
-                    <div id="${contentId}" class="modal-content bg-gray-800 rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col relative transform translate-y-0 transition-transform duration-300">
+                    <div id="${contentId}" class="modal-content bg-gray-800 rounded-xl shadow-2xl max-w-6xl w-full max-h-[90vh] overflow-hidden flex flex-col relative transform translate-y-0 transition-transform duration-300">
                         
                         <!-- Modal Header -->
                         <div class="flex justify-between items-center p-4 bg-gray-700 rounded-t-xl border-b border-gray-600">
@@ -323,11 +325,33 @@
 
 
         /**
-         * Inicializa as variáveis globais para a aplicação.
+         * Renderiza o HTML da tabela no output div e atualiza a mensagem.
+         * @param {Array} dataToRender - Array de objetos a ser visualizado.
+         * @param {string} messageText - A mensagem de status a ser exibida.
          */
-        document.addEventListener('DOMContentLoaded', () => {
-            document.getElementById('process-button').addEventListener('click', processJson);
-        });
+        function renderTable(dataToRender, messageText) {
+            const outputDiv = document.getElementById('output');
+            const messageDiv = document.getElementById('message');
+            outputDiv.innerHTML = '';
+            
+            messageDiv.textContent = messageText;
+
+            if (dataToRender.length === 0) {
+                outputDiv.innerHTML = '<p class="text-center text-gray-400 p-4">A tabela está vazia ou não há dados para processar.</p>';
+                return;
+            }
+
+            try {
+                const tableHtml = generateTableHtml(dataToRender, 'root-output');
+                outputDiv.innerHTML = '<div class="table-container shadow-2xl rounded-xl border border-gray-700">' + tableHtml + '</div>';
+            } catch (e) {
+                 console.error("Erro ao renderizar tabela:", e);
+                 messageDiv.textContent = 'Erro inesperado ao gerar a tabela. Verifique o console para detalhes.';
+                 messageDiv.classList.remove('bg-green-100', 'text-green-800');
+                 messageDiv.classList.add('bg-red-100', 'text-red-800');
+            }
+        }
+
 
         /**
          * Converte uma string JSON em uma tabela HTML visualizável (chamada inicial).
@@ -367,17 +391,12 @@
                 messageDiv.classList.add('bg-yellow-100', 'text-yellow-800');
                 return;
             }
-
+            
             try {
-                // Chama a função recursiva, passando um ID raiz único.
-                const tableHtml = generateTableHtml(dataArray, 'root-output');
-                
-                // Renderiza a tabela principal no contêiner raiz com scroll
-                outputDiv.innerHTML = '<div class="table-container shadow-2xl rounded-xl border border-gray-700">' + tableHtml + '</div>';
-                
-                messageDiv.textContent = `Sucesso! Foram visualizados ${dataArray.length} registro(s).`;
+                // Renderiza a tabela inicial (todos os dados) e exibe a mensagem de sucesso
+                renderTable(dataArray, `Sucesso! Foram visualizados ${dataArray.length} registro(s).`);
                 messageDiv.classList.add('bg-green-100', 'text-green-800');
-
+                
             } catch (e) {
                 console.error("Erro ao gerar tabela:", e);
                 messageDiv.textContent = 'Erro inesperado ao gerar a tabela. Verifique o console para detalhes.';
@@ -508,6 +527,13 @@
             tableHtml += '</tbody></table>';
             return tableHtml;
         }
+
+        /**
+         * Inicializa as variáveis globais e listeners de evento.
+         */
+        document.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('process-button').addEventListener('click', processJson);
+        });
     </script>
 </head>
 <!-- A classe "min-h-screen flex flex-col" garante que o body tenha altura mínima de tela e use Flexbox para o layout sticky-footer -->
@@ -529,6 +555,7 @@
                         class="w-full p-4 bg-gray-900 text-gray-200 border border-gray-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 transition duration-150"
                         placeholder='Cole seu JSON aqui. Ex: [{"id": 101, "nome": "Jubileia", "raca": "Alpina", "descricao": "A cabra mais produtiva da fazenda. Este é um texto longo de teste, com mais de 50 caracteres.", "producao_mensal": 150.5, "historico_medicamentos": [{"data": "2024-01-15", "medicamento": "Vacina A"}]}, {"id": 102, "nome": "Bode Alpha", "raca": "Boer", "descricao": "O macho alfa do rebanho.", "producao_mensal": 0, "historico_medicamentos": []}]'></textarea>
                 
+                <!-- Botão de Visualizar -->
                 <button id="process-button" 
                         class="mt-4 w-full sm:w-auto px-6 py-3 text-lg font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-md transition duration-200 transform hover:scale-[1.01] focus:outline-none focus:ring-4 focus:ring-blue-500 focus:ring-opacity-50">
                     Visualizar Tabela
