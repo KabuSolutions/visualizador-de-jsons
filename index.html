@@ -33,6 +33,16 @@
             transition: opacity 0.3s ease-in-out;
             pointer-events: auto !important; /* Sempre ativo para as modais */
         }
+        /* Ajuste para o resize handle no canto (W-3 H-3) */
+        .resize-handle-corner {
+            z-index: 30; /* Mais alto que as bordas */
+            background-color: transparent; /* Invisível */
+        }
+        /* Ajuste para o resize handle na borda (W-2 H-2) */
+        .resize-handle-edge {
+            z-index: 20; /* Alto, mas abaixo dos cantos */
+            background-color: transparent; /* Invisível */
+        }
     </style>
     <script>
         // Configuração do Tailwind (opcional, mas bom para consistência)
@@ -48,6 +58,143 @@
         
         // Pilha global para rastrear os IDs das modais abertas
         const modalStack = [];
+        
+        // Variáveis globais para o redimensionamento
+        let currentModalContent = null;
+        let startX, startY, startWidth, startHeight, startLeft, startTop;
+        let resizeDirection = null; 
+        
+        // Limites mínimos para redimensionamento
+        const MIN_WIDTH = 400;
+        const MIN_HEIGHT = 300;
+
+
+        /**
+         * Inicia o processo de redimensionamento ao pressionar o botão do mouse.
+         * @param {Event} e - O evento mousedown.
+         * @param {string} contentId - O ID do elemento modal-content a ser redimensionado.
+         */
+        function initResize(e, contentId) {
+            e.preventDefault();
+            e.stopPropagation();
+
+            currentModalContent = document.getElementById(contentId);
+            if (!currentModalContent) return;
+
+            // 1. Obter a direção a partir do handle
+            resizeDirection = e.target.getAttribute('data-direction');
+
+            // 2. Transicionar o modal para posição fixa para permitir o uso de 'top'/'left'
+            const rect = currentModalContent.getBoundingClientRect();
+            
+            // ATENÇÃO: Mudamos a posição para 'fixed' para desacoplar do layout de centragrem flex, 
+            // permitindo o redimensionamento a partir das bordas.
+            currentModalContent.style.position = 'fixed';
+            
+            // Remover classes de layout dinâmico
+            currentModalContent.classList.remove('max-w-4xl', 'w-full', 'max-h-[90vh]');
+
+            // 3. Capturar estados iniciais (posição e dimensões)
+            startX = e.clientX;
+            startY = e.clientY;
+            startWidth = rect.width;
+            startHeight = rect.height;
+            startLeft = rect.left;
+            startTop = rect.top;
+
+            // 4. Aplicar o estilo inicial para ancorar o redimensionamento
+            currentModalContent.style.width = `${startWidth}px`;
+            currentModalContent.style.height = `${startHeight}px`;
+            currentModalContent.style.left = `${startLeft}px`;
+            currentModalContent.style.top = `${startTop}px`;
+
+            // 5. Adicionar listeners globais para movimentação e soltura
+            window.addEventListener('mousemove', doResize, false);
+            window.addEventListener('mouseup', stopResize, false);
+        }
+
+        /**
+         * Executa o redimensionamento enquanto o mouse se move.
+         * @param {Event} e - O evento mousemove.
+         */
+        function doResize(e) {
+            if (!currentModalContent || !resizeDirection) return;
+
+            // Diferença total do mouse em relação ao ponto inicial
+            const deltaX = e.clientX - startX;
+            const deltaY = e.clientY - startY;
+
+            let newWidth = startWidth;
+            let newHeight = startHeight;
+            let newLeft = startLeft;
+            let newTop = startTop;
+
+            // --- Lógica de Redimensionamento Horizontal (Leste/Oeste) ---
+            if (resizeDirection.includes('e')) { // Leste (East/Right)
+                newWidth = startWidth + deltaX;
+            }
+            if (resizeDirection.includes('w')) { // Oeste (West/Left)
+                newWidth = startWidth - deltaX;
+                newLeft = startLeft + deltaX;
+            }
+
+            // --- Lógica de Redimensionamento Vertical (Norte/Sul) ---
+            if (resizeDirection.includes('s')) { // Sul (South/Bottom)
+                newHeight = startHeight + deltaY;
+            }
+            if (resizeDirection.includes('n')) { // Norte (North/Top)
+                newHeight = startHeight - deltaY;
+                newTop = startTop + deltaY;
+            }
+            
+            // 1. Aplicar nova largura e posição X, respeitando o limite mínimo
+            if (newWidth >= MIN_WIDTH) {
+                currentModalContent.style.width = `${newWidth}px`;
+                currentModalContent.style.left = `${newLeft}px`;
+            } else if (resizeDirection.includes('w')) {
+                 // Se o min width for atingido ao arrastar para a esquerda, 
+                 // precisamos manter a largura mínima e reverter o 'left'
+                 currentModalContent.style.left = `${startLeft + startWidth - MIN_WIDTH}px`;
+                 currentModalContent.style.width = `${MIN_WIDTH}px`;
+            } else {
+                 currentModalContent.style.width = `${MIN_WIDTH}px`;
+            }
+
+            // 2. Aplicar nova altura e posição Y, respeitando o limite mínimo
+            if (newHeight >= MIN_HEIGHT) {
+                currentModalContent.style.height = `${newHeight}px`;
+                currentModalContent.style.top = `${newTop}px`;
+            } else if (resizeDirection.includes('n')) {
+                 // Se o min height for atingido ao arrastar para cima, 
+                 // precisamos manter a altura mínima e reverter o 'top'
+                 currentModalContent.style.top = `${startTop + startHeight - MIN_HEIGHT}px`;
+                 currentModalContent.style.height = `${MIN_HEIGHT}px`;
+            } else {
+                currentModalContent.style.height = `${MIN_HEIGHT}px`;
+            }
+        }
+
+        /**
+         * Para o processo de redimensionamento ao soltar o botão do mouse.
+         * A modal volta para o centro da tela com o novo tamanho.
+         */
+        function stopResize() {
+            if (currentModalContent) {
+                window.removeEventListener('mousemove', doResize, false);
+                window.removeEventListener('mouseup', stopResize, false);
+                
+                // Limpa as propriedades de posicionamento 'fixed', 'left' e 'top'.
+                // O width e height (definidos em doResize) são mantidos, e a 
+                // modal-overlay (flex items-center justify-center) 
+                // re-centraliza o modal com as novas dimensões.
+                currentModalContent.style.position = '';
+                currentModalContent.style.left = '';
+                currentModalContent.style.top = '';
+                
+                currentModalContent = null;
+                resizeDirection = null;
+            }
+        }
 
         /**
          * Abre uma nova modal com a tabela para os dados aninhados.
@@ -67,6 +214,7 @@
 
             // 1. Gerar ID e Z-Index para a nova modal
             const newId = `modal-${modalStack.length}-${Date.now()}`;
+            const contentId = `modal-content-${newId}`; // Unique ID for the content div
             const zIndex = 60 + modalStack.length * 10;
             
             // Garantir que os dados sejam array para a função de criação de tabela.
@@ -78,7 +226,7 @@
             // 3. Criar o HTML completo da Modal
             const modalHtml = `
                 <div id="${newId}" class="modal-overlay fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center p-4" style="z-index: ${zIndex};">
-                    <div class="modal-content bg-gray-800 rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col transform translate-y-0 transition-transform duration-300">
+                    <div id="${contentId}" class="modal-content bg-gray-800 rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col relative transform translate-y-0 transition-transform duration-300">
                         
                         <!-- Modal Header -->
                         <div class="flex justify-between items-center p-4 bg-gray-700 rounded-t-xl border-b border-gray-600">
@@ -92,6 +240,20 @@
                         <div class="p-4 flex-grow overflow-y-auto">
                             ${tableContent}
                         </div>
+                        
+                        <!-- 8 Resize Handles (Invisíveis no estado normal) -->
+                        
+                        <!-- Cantos (3x3 pixels de área de clique) -->
+                        <div onmousedown="initResize(event, '${contentId}')" data-direction="nw" class="resize-handle-corner absolute top-0 left-0 w-3 h-3 cursor-nwse-resize"></div>
+                        <div onmousedown="initResize(event, '${contentId}')" data-direction="ne" class="resize-handle-corner absolute top-0 right-0 w-3 h-3 cursor-nesw-resize"></div>
+                        <div onmousedown="initResize(event, '${contentId}')" data-direction="sw" class="resize-handle-corner absolute bottom-0 left-0 w-3 h-3 cursor-nesw-resize"></div>
+                        <div onmousedown="initResize(event, '${contentId}')" data-direction="se" class="resize-handle-corner absolute bottom-0 right-0 w-3 h-3 cursor-nwse-resize"></div>
+
+                        <!-- Bordas (2px de largura/altura para arrasto) -->
+                        <div onmousedown="initResize(event, '${contentId}')" data-direction="n" class="resize-handle-edge absolute top-0 inset-x-0 h-2 cursor-ns-resize"></div>
+                        <div onmousedown="initResize(event, '${contentId}')" data-direction="e" class="resize-handle-edge absolute right-0 inset-y-0 w-2 cursor-ew-resize"></div>
+                        <div onmousedown="initResize(event, '${contentId}')" data-direction="s" class="resize-handle-edge absolute bottom-0 inset-x-0 h-2 cursor-ns-resize"></div>
+                        <div onmousedown="initResize(event, '${contentId}')" data-direction="w" class="resize-handle-edge absolute left-0 inset-y-0 w-2 cursor-ew-resize"></div>
                     </div>
                 </div>
             `;
@@ -293,7 +455,7 @@
                 Conversor JSON para Tabela (Visualização Recursiva por Modal)
             </h1>
             <p class="text-gray-400 mb-8 text-center">
-                Cole o seu JSON. Objetos e listas aninhados abrem uma nova janela (modal) com sua própria tabela, permitindo a navegação em profundidade.
+                Cole o seu JSON. Objetos e listas aninhados abrem uma nova janela (modal) com sua própria tabela, permitindo a navegação em profundidade. As modais agora podem ser **redimensionadas em todas as 8 direções**.
             </p>
 
             <!-- Área de Input e Ação -->
