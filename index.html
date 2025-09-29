@@ -9,13 +9,15 @@
     <style>
         /* Definindo a fonte Inter e o layout Flex para o rodapé 'sticky' */
         body {
-            font-family: 'Inter', sans-serif;
+            font-family: 'Inter', 'sans-serif';
             background-color: #1f2937; /* Gray-800 */
         }
         /* Estilos para o contêiner principal da tabela */
         .table-container {
             max-height: 70vh; /* Altura máxima para permitir scroll */
             overflow-y: auto; /* Garante que o container raiz tenha scroll vertical */
+            /* Adiciona scroll horizontal se necessário, especialmente para o modo vertical com muitos registros */
+            overflow-x: auto; 
         }
         /* Estilos gerais para células e cabeçalhos */
         .data-table th, .data-table td {
@@ -28,24 +30,27 @@
             top: 0;
             z-index: 10;
         }
+        /* Ajuste de estilo específico para cabeçalhos da tabela transposta (primeira coluna) */
+        .data-table th[scope="row"] {
+            position: sticky;
+            left: 0;
+            background-color: #374151; /* Gray-700 para destaque */
+            z-index: 15; /* Acima dos dados, abaixo do cabeçalho superior */
+            border-right: 1px solid #4b5563; /* Divisor claro */
+        }
+
         /* Modal Overlay - para garantir que as modais cubram tudo */
         .modal-overlay {
             transition: opacity 0.3s ease-in-out;
-            pointer-events: auto !important; /* Sempre ativo para as modais */
+            pointer-events: auto !important; 
         }
-        /* Ajuste para o resize handle no canto (W-3 H-3) */
-        .resize-handle-corner {
-            z-index: 30; /* Mais alto que as bordas */
-            background-color: transparent; /* Invisível */
-        }
-        /* Ajuste para o resize handle na borda (W-2 H-2) */
-        .resize-handle-edge {
-            z-index: 20; /* Alto, mas abaixo dos cantos */
-            background-color: transparent; /* Invisível */
+        /* Estilos para o Handle (ponto) do Toggle */
+        .peer:checked ~ .dot {
+            transform: translateX(24px); /* Move 6 * 4px = 24px */
+            /* Bolinha permanece branca, apenas a trilha (track) muda de cor (definido no HTML) */
         }
     </style>
     <script>
-        // Configuração do Tailwind (opcional, mas bom para consistência)
         tailwind.config = {
             theme: {
                 extend: {
@@ -68,11 +73,94 @@
         const MIN_WIDTH = 400;
         const MIN_HEIGHT = 300;
 
+        // Estado do Toggle Vertical View (global para ser acessível em processJson)
+        let isVerticalView = false; 
+
+
+        /**
+         * Helper function to generate HTML for a single cell (td).
+         * @param {*} value - The cell value.
+         * @param {string} header - The key/header name for the value.
+         * @returns {string} The HTML for the <td> element.
+         */
+        function generateCellHtml(value, header) {
+            let displayContent = '';
+            let cellClass = 'align-top text-white p-3';
+            
+            // Tratamento de valores aninhados (Objetos ou Arrays)
+            if (typeof value === 'object' && value !== null) {
+                const isArray = Array.isArray(value);
+                // Garantir que os dados complexos sejam sempre um array para a função de tabela aninhada
+                const complexDataArray = isArray ? value : [value];
+                const count = isArray ? value.length : Object.keys(value).length;
+                const typeLabel = isArray ? `Array [${count}]` : `Objeto (${count} Chaves)`;
+
+                // 1. Stringify os dados complexos
+                const complexJsonString = JSON.stringify(complexDataArray);
+                
+                // 2. URL-encode o JSON e escape o título para o onclick
+                const encodedJson = encodeURIComponent(complexJsonString);
+                const titleText = `${header} (${typeLabel})`;
+                const escapedTitle = titleText.replace(/'/g, "\\'"); 
+                
+                // Constrói o botão que irá abrir a nova modal
+                displayContent = `
+                    <button onclick="openModal('${encodedJson}', '${escapedTitle}')" 
+                        data-original-text="Ver Estrutura (${typeLabel})"
+                        class="text-xs font-semibold px-3 py-1 bg-blue-600 hover:bg-blue-700 rounded text-white transition duration-150 shadow-md transform hover:scale-[1.03]">
+                        Ver Estrutura (${typeLabel})
+                    </button>
+                `;
+                cellClass += ' max-w-sm'; 
+            } else if (value === undefined || value === null) {
+                displayContent = 'N/A';
+                cellClass += ' text-gray-500 italic';
+            } else if (typeof value === 'boolean') {
+                displayContent = value ? 'VERDADEIRO' : 'FALSO';
+                cellClass += value ? ' text-green-400 font-medium' : ' text-red-400 font-medium';
+            } else {
+                // Valores simples (string, number)
+                let displayValue = String(value);
+                const originalValue = displayValue;
+                const MAX_LENGTH = 50;
+                let isTruncated = false;
+                
+                if (displayValue.length > MAX_LENGTH) {
+                    // Trunca o texto
+                    displayValue = displayValue.substring(0, MAX_LENGTH - 3) + '...';
+                    isTruncated = true;
+                }
+
+                if (isTruncated) {
+                    // Encodifica o texto completo para passar para a modal de inspeção
+                    const encodedText = encodeURIComponent(originalValue);
+                    const titleText = `Inspeção de Conteúdo: ${header}`;
+
+                    displayContent = `
+                        <div onclick="openTextModal('${encodedText}', '${titleText}')" 
+                            class="group relative cursor-pointer hover:text-blue-400 transition duration-150">
+                            
+                            <!-- Display Truncated Text -->
+                            <span class="truncate block max-w-full">${displayValue}</span>
+
+                            <!-- Tooltip (Dica) for inspection (ACIMA E CENTRALIZADO) -->
+                            <div class="absolute z-40 bottom-full left-1/2 -translate-x-1/2 mb-1 w-max max-w-xs px-2 py-1 bg-gray-600 text-xs text-white rounded opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none shadow-lg whitespace-nowrap">
+                                Clique para Inspecionar
+                            </div>
+                        </div>
+                    `;
+                    cellClass += ' max-w-sm'; // Mantém o max width na célula
+                } else {
+                    displayContent = originalValue;
+                }
+            }
+            
+            return `<td class="${cellClass}"><div class="max-w-md">${displayContent}</div></td>`;
+        }
 
         /**
          * Inicia o processo de redimensionamento ao pressionar o botão do mouse.
-         * @param {Event} e - O evento mousedown.
-         * @param {string} contentId - O ID do elemento modal-content a ser redimensionado.
+         * (Redimensionamento de modal)
          */
         function initResize(e, contentId) {
             e.preventDefault();
@@ -81,21 +169,14 @@
             currentModalContent = document.getElementById(contentId);
             if (!currentModalContent) return;
 
-            // 1. Obter a direção a partir do handle
             resizeDirection = e.target.getAttribute('data-direction');
 
-            // 2. Transicionar o modal para posição fixa para permitir o uso de 'top'/'left'
             const rect = currentModalContent.getBoundingClientRect();
             
-            // ATENÇÃO: Mudamos a posição para 'fixed' para desacoplar do layout de centragrem flex, 
-            // permitindo o redimensionamento a partir das bordas.
             currentModalContent.style.position = 'fixed';
             
-            // Remover classes de layout dinâmico
-            // Nota: O max-w-6xl é removido aqui, mas as dimensões fixas serão aplicadas abaixo.
             currentModalContent.classList.remove('max-w-6xl', 'w-full', 'max-h-[90vh]');
 
-            // 3. Capturar estados iniciais (posição e dimensões)
             startX = e.clientX;
             startY = e.clientY;
             startWidth = rect.width;
@@ -103,25 +184,21 @@
             startLeft = rect.left;
             startTop = rect.top;
 
-            // 4. Aplicar o estilo inicial para ancorar o redimensionamento
             currentModalContent.style.width = `${startWidth}px`;
             currentModalContent.style.height = `${startHeight}px`;
             currentModalContent.style.left = `${startLeft}px`;
             currentModalContent.style.top = `${startTop}px`;
 
-            // 5. Adicionar listeners globais para movimentação e soltura
             window.addEventListener('mousemove', doResize, false);
             window.addEventListener('mouseup', stopResize, false);
         }
 
         /**
          * Executa o redimensionamento enquanto o mouse se move.
-         * @param {Event} e - O evento mousemove.
          */
         function doResize(e) {
             if (!currentModalContent || !resizeDirection) return;
 
-            // Diferença total do mouse em relação ao ponto inicial
             const deltaX = e.clientX - startX;
             const deltaY = e.clientY - startY;
 
@@ -153,8 +230,6 @@
                 currentModalContent.style.width = `${newWidth}px`;
                 currentModalContent.style.left = `${newLeft}px`;
             } else if (resizeDirection.includes('w')) {
-                 // Se o min width for atingido ao arrastar para a esquerda, 
-                 // precisamos manter a largura mínima e reverter o 'left'
                  currentModalContent.style.left = `${startLeft + startWidth - MIN_WIDTH}px`;
                  currentModalContent.style.width = `${MIN_WIDTH}px`;
             } else {
@@ -166,8 +241,6 @@
                 currentModalContent.style.height = `${newHeight}px`;
                 currentModalContent.style.top = `${newTop}px`;
             } else if (resizeDirection.includes('n')) {
-                 // Se o min height for atingido ao arrastar para cima, 
-                 // precisamos manter a altura mínima e reverter o 'top'
                  currentModalContent.style.top = `${startTop + startHeight - MIN_HEIGHT}px`;
                  currentModalContent.style.height = `${MIN_HEIGHT}px`;
             } else {
@@ -176,18 +249,13 @@
         }
 
         /**
-         * Para o processo de redimensionamento ao soltar o botão do mouse.
-         * A modal volta para o centro da tela com o novo tamanho.
+         * Para o processo de redimensionamento.
          */
         function stopResize() {
             if (currentModalContent) {
                 window.removeEventListener('mousemove', doResize, false);
                 window.removeEventListener('mouseup', stopResize, false);
                 
-                // Limpa as propriedades de posicionamento 'fixed', 'left' e 'top'.
-                // O width e height (definidos em doResize) são mantidos, e a 
-                // modal-overlay (flex items-center justify-center) 
-                // re-centraliza o modal com as novas dimensões.
                 currentModalContent.style.position = '';
                 currentModalContent.style.left = '';
                 currentModalContent.style.top = '';
@@ -199,13 +267,10 @@
 
         /**
          * Abre uma nova modal com a tabela para os dados aninhados (Objetos/Arrays).
-         * @param {string} jsonString - O JSON aninhado (stringificada e URI encoded) para a nova tabela.
-         * @param {string} title - O título da modal.
          */
         function openModal(jsonString, title) {
             let complexDataArray;
             try {
-                // Decodifica a string JSON que veio do onclick
                 const decodedJson = decodeURIComponent(jsonString);
                 complexDataArray = JSON.parse(decodedJson);
             } catch (e) {
@@ -215,17 +280,15 @@
 
             // 1. Gerar ID e Z-Index para a nova modal
             const newId = `modal-${modalStack.length}-${Date.now()}`;
-            const contentId = `modal-content-${newId}`; // Unique ID for the content div
+            const contentId = `modal-content-${newId}`; 
             const zIndex = 60 + modalStack.length * 10;
             
-            // Garantir que os dados sejam array para a função de criação de tabela.
             const dataToRender = Array.isArray(complexDataArray) ? complexDataArray : [complexDataArray];
 
-            // 2. Gerar o conteúdo da tabela aninhada
+            // 2. Gerar o conteúdo da tabela aninhada (SEMPRE HORIZONTAL no modal)
             const tableContent = generateTableHtml(dataToRender, newId);
 
             // 3. Criar o HTML completo da Modal
-            // Alterado de max-w-4xl para max-w-6xl para aumentar o tamanho inicial da modal
             const modalHtml = `
                 <div id="${newId}" class="modal-overlay fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center p-4" style="z-index: ${zIndex};">
                     <div id="${contentId}" class="modal-content bg-gray-800 rounded-xl shadow-2xl max-w-6xl w-full max-h-[90vh] overflow-hidden flex flex-col relative transform translate-y-0 transition-transform duration-300">
@@ -239,23 +302,19 @@
                         </div>
 
                         <!-- Modal Body (Table Container) -->
-                        <div class="p-4 flex-grow overflow-y-auto">
+                        <div class="p-4 flex-grow overflow-y-auto overflow-x-auto">
                             ${tableContent}
                         </div>
                         
-                        <!-- 8 Resize Handles (Invisíveis no estado normal) -->
-                        
-                        <!-- Cantos (3x3 pixels de área de clique) -->
-                        <div onmousedown="initResize(event, '${contentId}')" data-direction="nw" class="resize-handle-corner absolute top-0 left-0 w-3 h-3 cursor-nwse-resize"></div>
-                        <div onmousedown="initResize(event, '${contentId}')" data-direction="ne" class="resize-handle-corner absolute top-0 right-0 w-3 h-3 cursor-nesw-resize"></div>
-                        <div onmousedown="initResize(event, '${contentId}')" data-direction="sw" class="resize-handle-corner absolute bottom-0 left-0 w-3 h-3 cursor-nesw-resize"></div>
-                        <div onmousedown="initResize(event, '${contentId}')" data-direction="se" class="resize-handle-corner absolute bottom-0 right-0 w-3 h-3 cursor-nwse-resize"></div>
-
-                        <!-- Bordas (2px de largura/altura para arrasto) -->
-                        <div onmousedown="initResize(event, '${contentId}')" data-direction="n" class="resize-handle-edge absolute top-0 inset-x-0 h-2 cursor-ns-resize"></div>
-                        <div onmousedown="initResize(event, '${contentId}')" data-direction="e" class="resize-handle-edge absolute right-0 inset-y-0 w-2 cursor-ew-resize"></div>
-                        <div onmousedown="initResize(event, '${contentId}')" data-direction="s" class="resize-handle-edge absolute bottom-0 inset-x-0 h-2 cursor-ns-resize"></div>
-                        <div onmousedown="initResize(event, '${contentId}')" data-direction="w" class="resize-handle-edge absolute left-0 inset-y-0 w-2 cursor-ew-resize"></div>
+                        <!-- Resize Handles -->
+                        <div onmousedown="initResize(event, '${contentId}')" data-direction="nw" class="absolute top-0 left-0 w-3 h-3 cursor-nwse-resize"></div>
+                        <div onmousedown="initResize(event, '${contentId}')" data-direction="ne" class="absolute top-0 right-0 w-3 h-3 cursor-nesw-resize"></div>
+                        <div onmousedown="initResize(event, '${contentId}')" data-direction="sw" class="absolute bottom-0 left-0 w-3 h-3 cursor-nesw-resize"></div>
+                        <div onmousedown="initResize(event, '${contentId}')" data-direction="se" class="absolute bottom-0 right-0 w-3 h-3 cursor-nwse-resize"></div>
+                        <div onmousedown="initResize(event, '${contentId}')" data-direction="n" class="absolute top-0 inset-x-0 h-2 cursor-ns-resize"></div>
+                        <div onmousedown="initResize(event, '${contentId}')" data-direction="e" class="absolute right-0 inset-y-0 w-2 cursor-ew-resize"></div>
+                        <div onmousedown="initResize(event, '${contentId}')" data-direction="s" class="absolute bottom-0 inset-x-0 h-2 cursor-ns-resize"></div>
+                        <div onmousedown="initResize(event, '${contentId}')" data-direction="w" class="absolute left-0 inset-y-0 w-2 cursor-ew-resize"></div>
                     </div>
                 </div>
             `;
@@ -267,13 +326,10 @@
 
         /**
          * Abre uma modal dedicada para inspecionar o conteúdo completo de uma string longa.
-         * @param {string} encodedText - O texto completo codificado em URI.
-         * @param {string} title - O título da modal.
          */
         function openTextModal(encodedText, title) {
             const fullText = decodeURIComponent(encodedText);
             
-            // Gera ID e Z-Index para a nova modal (certificando-se de que esteja no topo)
             const newId = `modal-text-${modalStack.length}-${Date.now()}`;
             const zIndex = 60 + modalStack.length * 10;
 
@@ -304,30 +360,25 @@
 
         /**
          * Fecha a modal do topo da pilha.
-         * @param {string} id - O ID da modal a ser fechada.
          */
         function closeModal(id) {
             const modalElement = document.getElementById(id);
             if (!modalElement) return;
 
-            // Animação de fechamento (opcional, mas melhora UX)
             modalElement.style.opacity = '0';
             setTimeout(() => {
                 modalElement.remove();
                 
-                // Remove da pilha
                 const index = modalStack.indexOf(id);
                 if (index > -1) {
                     modalStack.splice(index, 1);
                 }
-            }, 300); // Tempo igual ao da transição CSS
+            }, 300);
         }
 
 
         /**
-         * Renderiza o HTML da tabela no output div e atualiza a mensagem.
-         * @param {Array} dataToRender - Array de objetos a ser visualizado.
-         * @param {string} messageText - A mensagem de status a ser exibida.
+         * Renderiza o HTML da tabela no output div.
          */
         function renderTable(dataToRender, messageText) {
             const outputDiv = document.getElementById('output');
@@ -384,6 +435,7 @@
                 return;
             }
             
+            // Se for um objeto único, transforma em um array de um elemento
             const dataArray = Array.isArray(data) ? data : [data];
 
             if (dataArray.length === 0) {
@@ -393,7 +445,6 @@
             }
             
             try {
-                // Renderiza a tabela inicial (todos os dados) e exibe a mensagem de sucesso
                 renderTable(dataArray, `Sucesso! Foram visualizados ${dataArray.length} registro(s).`);
                 messageDiv.classList.add('bg-green-100', 'text-green-800');
                 
@@ -405,12 +456,12 @@
         }
 
         /**
-         * Gera o HTML da tabela recursivamente (apenas a estrutura <table>).
-         * @param {Array} dataArray - O array de objetos a ser visualizado.
-         * @param {string} parentId - Um ID único para determinar as classes de estilo.
-         * @returns {string} O HTML da tabela (<table>...</table>).
+         * Gera o HTML da tabela, suportando a visualização vertical para a tabela raiz.
          */
         function generateTableHtml(dataArray, parentId) {
+            // A visualização vertical só é aplicada à tabela principal ('root-output')
+            const renderVertical = (parentId === 'root-output' && isVerticalView);
+
             let headers = new Set();
             dataArray.forEach(item => {
                 if (typeof item === 'object' && item !== null) {
@@ -423,7 +474,6 @@
                 return '<p class="text-center text-gray-500 p-2 text-xs">Sem dados/chaves para visualizar neste nível.</p>';
             }
             
-            // Define cores baseadas na profundidade. Se for root-output, é o tema principal.
             const isRoot = parentId === 'root-output';
             const headerBgClass = isRoot ? 'bg-gray-700' : 'bg-gray-600'; 
             const rowBg1 = isRoot ? 'bg-gray-800' : 'bg-gray-700/70';
@@ -431,135 +481,141 @@
 
             // Início da Tabela
             let tableHtml = `<table class="data-table w-full text-sm text-left text-gray-300 border-separate border-spacing-0 rounded-lg overflow-hidden">`; 
-            
-            // Cabeçalho
-            tableHtml += '<thead><tr>';
-            headers.forEach(header => {
-                tableHtml += `<th scope="col" class="font-bold uppercase tracking-wider ${headerBgClass} p-3 text-xs border-b border-gray-600">${header}</th>`;
-            });
-            tableHtml += '</tr></thead>';
-            
-            // Corpo da Tabela
-            tableHtml += '<tbody class="divide-y divide-gray-700">';
 
-            dataArray.forEach((item, rowIndex) => {
-                const rowClass = rowIndex % 2 === 0 ? rowBg1 : rowBg2;
-                tableHtml += `<tr class="${rowClass} hover:bg-gray-700 transition duration-150">`;
-
-                headers.forEach(header => {
-                    let value = item[header];
-                    let displayContent = '';
-                    let cellClass = 'align-top text-white p-3';
-                    
-                    // Tratamento de valores aninhados (Objetos ou Arrays)
-                    if (typeof value === 'object' && value !== null) {
-                        const isArray = Array.isArray(value);
-                        const complexDataArray = isArray ? value : [value];
-                        const count = isArray ? value.length : Object.keys(value).length;
-                        const typeLabel = isArray ? `Array [${count}]` : `Objeto (${count} Chaves)`;
-
-                        // 1. Stringify os dados complexos
-                        const complexJsonString = JSON.stringify(complexDataArray);
-                        
-                        // 2. URL-encode o JSON e escape o título para o onclick
-                        const encodedJson = encodeURIComponent(complexJsonString);
-                        const titleText = `${header} (${typeLabel})`;
-                        const escapedTitle = titleText.replace(/'/g, "\\'"); 
-                        
-                        // Constrói o botão que irá abrir a nova modal
-                        displayContent = `
-                            <button onclick="openModal('${encodedJson}', '${escapedTitle}')" 
-                                data-original-text="Ver Estrutura (${typeLabel})"
-                                class="text-xs font-semibold px-3 py-1 bg-blue-600 hover:bg-blue-700 rounded text-white transition duration-150 shadow-md transform hover:scale-[1.03]">
-                                Ver Estrutura (${typeLabel})
-                            </button>
-                        `;
-                        cellClass += ' max-w-sm'; 
-                    } else if (value === undefined || value === null) {
-                        displayContent = 'N/A';
-                        cellClass += ' text-gray-500 italic';
-                    } else if (typeof value === 'boolean') {
-                        displayContent = value ? 'VERDADEIRO' : 'FALSO';
-                        cellClass += value ? ' text-green-400 font-medium' : ' text-red-400 font-medium';
-                    } else {
-                        // Valores simples (string, number)
-                        let displayValue = String(value);
-                        const originalValue = displayValue;
-                        const MAX_LENGTH = 50;
-                        let isTruncated = false;
-                        
-                        if (displayValue.length > MAX_LENGTH) {
-                            // Trunca o texto
-                            displayValue = displayValue.substring(0, MAX_LENGTH - 3) + '...';
-                            isTruncated = true;
-                        }
-
-                        if (isTruncated) {
-                            // Encodifica o texto completo para passar para a modal de inspeção
-                            const encodedText = encodeURIComponent(originalValue);
-                            const titleText = `Inspeção de Conteúdo: ${header}`;
-
-                            displayContent = `
-                                <div onclick="openTextModal('${encodedText}', '${titleText}')" 
-                                    class="group relative cursor-pointer hover:text-blue-400 transition duration-150">
-                                    
-                                    <!-- Display Truncated Text -->
-                                    <span class="truncate block max-w-full">${displayValue}</span>
-
-                                    <!-- Tooltip (Dica) for inspection (ACIMA E CENTRALIZADO) -->
-                                    <div class="absolute z-40 bottom-full left-1/2 -translate-x-1/2 mb-1 w-max max-w-xs px-2 py-1 bg-gray-600 text-xs text-white rounded opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none shadow-lg whitespace-nowrap">
-                                        Clique para Inspecionar
-                                    </div>
-                                </div>
-                            `;
-                            cellClass += ' max-w-sm'; // Mantém o max width na célula
-                        } else {
-                            displayContent = originalValue;
-                        }
-                    }
-                    
-                    tableHtml += `<td class="${cellClass}"><div class="max-w-md">${displayContent}</div></td>`;
-                });
+            if (!renderVertical) {
+                // --- VISUALIZAÇÃO NORMAL (HORIZONTAL) ---
                 
-                tableHtml += '</tr>';
-            });
+                // Cabeçalhos (Keys)
+                tableHtml += '<thead><tr>';
+                headers.forEach(header => {
+                    tableHtml += `<th scope="col" class="font-bold uppercase tracking-wider ${headerBgClass} p-3 text-xs border-b border-gray-600">${header}</th>`;
+                });
+                tableHtml += '</tr></thead>';
+                
+                // Corpo da Tabela (Rows = Records)
+                tableHtml += '<tbody class="divide-y divide-gray-700">';
 
-            tableHtml += '</tbody></table>';
+                dataArray.forEach((item, rowIndex) => {
+                    const rowClass = rowIndex % 2 === 0 ? rowBg1 : rowBg2;
+                    tableHtml += `<tr class="${rowClass} hover:bg-gray-700 transition duration-150">`;
+
+                    headers.forEach(header => {
+                        // Célula gerada pelo helper
+                        tableHtml += generateCellHtml(item[header], header);
+                    });
+                    
+                    tableHtml += '</tr>';
+                });
+
+                tableHtml += '</tbody>';
+            } else {
+                // --- VISUALIZAÇÃO VERTICAL (TRANSPOSTA) ---
+                
+                // Cabeçalhos Transpostos (Registro 1, Registro 2, ...)
+                tableHtml += '<thead><tr>';
+                // Primeira coluna: O campo/chave
+                tableHtml += `<th scope="col" class="font-bold uppercase tracking-wider ${headerBgClass} p-3 text-xs border-b border-gray-600">Campo (Chave)</th>`;
+                // Colunas subsequentes: Registros individuais
+                dataArray.forEach((_, index) => {
+                    tableHtml += `<th scope="col" class="font-bold uppercase tracking-wider ${headerBgClass} p-3 text-xs border-b border-gray-600">Registro #${index + 1}</th>`;
+                });
+                tableHtml += '</tr></thead>';
+
+                // Corpo da Tabela (Rows = Keys)
+                tableHtml += '<tbody class="divide-y divide-gray-700">';
+
+                headers.forEach((header, rowIndex) => {
+                    const rowClass = rowIndex % 2 === 0 ? rowBg1 : rowBg2;
+                    // A primeira célula é o cabeçalho da linha (sticky)
+                    tableHtml += `<tr class="${rowClass} hover:bg-gray-700 transition duration-150">`;
+                    tableHtml += `<th scope="row" class="font-bold text-gray-200 align-top p-3 ${rowClass}">${header}</th>`;
+
+                    // Células subsequentes: Valores para esta chave em cada registro
+                    dataArray.forEach(item => {
+                        tableHtml += generateCellHtml(item[header], header);
+                    });
+                    
+                    tableHtml += '</tr>';
+                });
+
+                tableHtml += '</tbody>';
+            }
+
+            tableHtml += '</table>';
             return tableHtml;
         }
-
+        
         /**
          * Inicializa as variáveis globais e listeners de evento.
          */
         document.addEventListener('DOMContentLoaded', () => {
-            document.getElementById('process-button').addEventListener('click', processJson);
+            const processButton = document.getElementById('process-button');
+            const toggle = document.getElementById('vertical-toggle');
+
+            processButton.addEventListener('click', processJson);
+
+            // Listener para o toggle
+            toggle.addEventListener('change', () => {
+                isVerticalView = toggle.checked;
+                // Re-processa o JSON imediatamente para atualizar a tabela, se houver conteúdo
+                if (document.getElementById('json-input').value.trim()) {
+                    processJson();
+                } else {
+                    const messageDiv = document.getElementById('message');
+                    messageDiv.textContent = isVerticalView 
+                        ? 'Visualização vertical ativada. Cole o JSON.' 
+                        : 'Visualização normal ativada. Cole o JSON.';
+                    messageDiv.className = 'text-center p-3 font-medium rounded-lg mb-4 bg-yellow-100 text-yellow-800';
+                    document.getElementById('output').innerHTML = '';
+                }
+            });
+            
+            // Mensagem inicial
+            document.getElementById('message').textContent = 'Cole seu JSON e clique em Visualizar Tabela.';
+            document.getElementById('message').className = 'text-center p-3 font-medium rounded-lg mb-4 bg-gray-600 text-gray-200';
         });
     </script>
 </head>
-<!-- A classe "min-h-screen flex flex-col" garante que o body tenha altura mínima de tela e use Flexbox para o layout sticky-footer -->
 <body class="min-h-screen flex flex-col">
 
-    <!-- Conteúdo Principal - Usando p-8 e flex-grow para ocupar o espaço restante -->
+    <!-- Conteúdo Principal -->
     <div class="p-8 flex-grow">
         <div class="max-w-6xl mx-auto">
             <h1 class="text-4xl font-extrabold text-white mb-6 text-center">
-                Conversor JSON para Tabela (Visualização Recursiva)
+                Conversor JSON para Tabela
             </h1>
             <p class="text-gray-400 mb-8 text-center">
-                Cole o seu JSON. Campos de texto longos podem ser inspecionados clicando-se na célula truncada.
+                Cole o seu JSON. Use o toggle para alternar entre a visualização horizontal (padrão) e a vertical (transposta) para dados com muitas colunas.
             </p>
 
             <!-- Área de Input e Ação -->
             <div class="bg-gray-700 p-6 rounded-xl shadow-lg mb-6">
                 <textarea id="json-input" rows="10" 
                         class="w-full p-4 bg-gray-900 text-gray-200 border border-gray-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 transition duration-150"
-                        placeholder='Cole seu JSON aqui. Ex: [{"id": 101, "nome": "Jubileia", "raca": "Alpina", "descricao": "A cabra mais produtiva da fazenda. Este é um texto longo de teste, com mais de 50 caracteres.", "producao_mensal": 150.5, "historico_medicamentos": [{"data": "2024-01-15", "medicamento": "Vacina A"}]}, {"id": 102, "nome": "Bode Alpha", "raca": "Boer", "descricao": "O macho alfa do rebanho.", "producao_mensal": 0, "historico_medicamentos": []}]'></textarea>
+                        placeholder='Cole seu JSON aqui. Ex: [{"id": 101, "nome": "Item A", "detalhes": {...}}, {"id": 102, ...}]'></textarea>
                 
-                <!-- Botão de Visualizar -->
-                <button id="process-button" 
-                        class="mt-4 w-full sm:w-auto px-6 py-3 text-lg font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-md transition duration-200 transform hover:scale-[1.01] focus:outline-none focus:ring-4 focus:ring-blue-500 focus:ring-opacity-50">
-                    Visualizar Tabela
-                </button>
+                <div class="mt-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+                    <div class="flex flex-col sm:flex-row gap-4 w-full sm:w-auto">
+                        <!-- Botão de Visualizar -->
+                        <button id="process-button" 
+                                class="w-full sm:w-auto px-6 py-3 text-lg font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-md transition duration-200 transform hover:scale-[1.01] focus:outline-none focus:ring-4 focus:ring-blue-500 focus:ring-opacity-50">
+                            Visualizar Tabela
+                        </button>
+                    </div>
+                    
+                    <!-- Toggle Visualização Vertical -->
+                    <label for="vertical-toggle" class="flex items-center cursor-pointer space-x-3 mt-4 sm:mt-0">
+                        <span class="text-white text-sm font-medium">Visualização Vertical (Transposta)</span>
+                        <div class="relative">
+                            <!-- Hidden checkbox is the 'peer' -->
+                            <input type="checkbox" id="vertical-toggle" class="sr-only peer"> 
+                            <!-- Track (Red disabled, Green checked) -->
+                            <div class="block w-14 h-8 rounded-full bg-red-600 peer-checked:bg-green-500 transition duration-200"></div>
+                            <!-- Handle (White) -->
+                            <div class="dot absolute left-1 top-1 bg-white w-6 h-6 rounded-full transition transform shadow-md"></div>
+                        </div>
+                    </label>
+                </div>
             </div>
 
             <!-- Área de Mensagens (Erros/Sucesso) -->
@@ -577,7 +633,7 @@
         <!-- Modais serão anexadas aqui, sobrepondo o conteúdo principal -->
     </div>
 
-    <!-- Rodapé (Footer) - Posicionado no final pelo 'flex-col' do body -->
+    <!-- Rodapé (Footer) -->
     <footer class="bg-gray-900 text-gray-400 text-center text-sm p-4 w-full border-t border-gray-700 shadow-xl">
         Criado por KabuSolutions - 2025
     </footer>
