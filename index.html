@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Visualizador de Dados JSON</title>
+    <!-- Carregando Tailwind CSS para estilização moderna e responsiva -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Definindo a fonte Inter e o layout Flex para o rodapé 'sticky' */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #1f2937; /* Gray-800 */
+        }
+        /* Estilos para o contêiner principal da tabela */
+        .table-container {
+            max-height: 70vh; /* Altura máxima para permitir scroll */
+            overflow-y: auto; /* Garante que o container raiz tenha scroll vertical */
+        }
+        /* Estilos gerais para células e cabeçalhos */
+        .data-table th, .data-table td {
+            padding: 12px 16px;
+            text-align: left;
+        }
+        .data-table th {
+            color: #f3f4f6; /* Gray-100 */
+            position: sticky; /* Fixa o cabeçalho no topo ao rolar */
+            top: 0;
+            z-index: 10;
+        }
+        /* Modal Overlay - para garantir que as modais cubram tudo */
+        .modal-overlay {
+            transition: opacity 0.3s ease-in-out;
+            pointer-events: auto !important; /* Sempre ativo para as modais */
+        }
+    </style>
+    <script>
+        // Configuração do Tailwind (opcional, mas bom para consistência)
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                }
+            }
+        }
+        
+        // Pilha global para rastrear os IDs das modais abertas
+        const modalStack = [];
+
+        /**
+         * Abre uma nova modal com a tabela para os dados aninhados.
+         * @param {string} jsonString - O JSON aninhado (stringificada e URI encoded) para a nova tabela.
+         * @param {string} title - O título da modal.
+         */
+        function openModal(jsonString, title) {
+            let complexDataArray;
+            try {
+                // Decodifica a string JSON que veio do onclick
+                const decodedJson = decodeURIComponent(jsonString);
+                complexDataArray = JSON.parse(decodedJson);
+            } catch (e) {
+                console.error("Erro ao analisar JSON para modal:", e);
+                return;
+            }
+
+            // 1. Gerar ID e Z-Index para a nova modal
+            const newId = `modal-${modalStack.length}-${Date.now()}`;
+            const zIndex = 60 + modalStack.length * 10;
+            
+            // Garantir que os dados sejam array para a função de criação de tabela.
+            const dataToRender = Array.isArray(complexDataArray) ? complexDataArray : [complexDataArray];
+
+            // 2. Gerar o conteúdo da tabela aninhada
+            const tableContent = generateTableHtml(dataToRender, newId);
+
+            // 3. Criar o HTML completo da Modal
+            const modalHtml = `
+                <div id="${newId}" class="modal-overlay fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center p-4" style="z-index: ${zIndex};">
+                    <div class="modal-content bg-gray-800 rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col transform translate-y-0 transition-transform duration-300">
+                        
+                        <!-- Modal Header -->
+                        <div class="flex justify-between items-center p-4 bg-gray-700 rounded-t-xl border-b border-gray-600">
+                            <h2 class="text-xl font-bold text-white truncate">${title}</h2>
+                            <button onclick="closeModal('${newId}')" class="text-gray-300 hover:text-white transition p-2 rounded-full hover:bg-gray-600">
+                                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                            </button>
+                        </div>
+
+                        <!-- Modal Body (Table Container) -->
+                        <div class="p-4 flex-grow overflow-y-auto">
+                            ${tableContent}
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            // 4. Inserir no DOM e atualizar a pilha
+            document.getElementById('modal-stack').insertAdjacentHTML('beforeend', modalHtml);
+            modalStack.push(newId);
+        }
+
+        /**
+         * Fecha a modal do topo da pilha.
+         * @param {string} id - O ID da modal a ser fechada.
+         */
+        function closeModal(id) {
+            const modalElement = document.getElementById(id);
+            if (!modalElement) return;
+
+            // Animação de fechamento (opcional, mas melhora UX)
+            modalElement.style.opacity = '0';
+            setTimeout(() => {
+                modalElement.remove();
+                
+                // Remove da pilha
+                const index = modalStack.indexOf(id);
+                if (index > -1) {
+                    modalStack.splice(index, 1);
+                }
+            }, 300); // Tempo igual ao da transição CSS
+        }
+
+
+        /**
+         * Inicializa as variáveis globais para a aplicação.
+         */
+        document.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('process-button').addEventListener('click', processJson);
+        });
+
+        /**
+         * Converte uma string JSON em uma tabela HTML visualizável (chamada inicial).
+         */
+        function processJson() {
+            const jsonInput = document.getElementById('json-input').value.trim();
+            const outputDiv = document.getElementById('output');
+            const messageDiv = document.getElementById('message');
+            
+            // Limpa a tela e fecha quaisquer modais abertas
+            outputDiv.innerHTML = '';
+            document.getElementById('modal-stack').innerHTML = '';
+            modalStack.length = 0; 
+            
+            messageDiv.textContent = '';
+            messageDiv.className = 'text-center p-3 font-medium rounded-lg mb-4';
+
+            if (!jsonInput) {
+                messageDiv.textContent = 'Por favor, cole o JSON no campo acima.';
+                messageDiv.classList.add('bg-yellow-100', 'text-yellow-800');
+                return;
+            }
+
+            let data;
+            try {
+                data = JSON.parse(jsonInput);
+            } catch (e) {
+                messageDiv.textContent = 'Erro: JSON inválido. Verifique a sintaxe (chaves, vírgulas, aspas).';
+                messageDiv.classList.add('bg-red-100', 'text-red-800');
+                return;
+            }
+            
+            const dataArray = Array.isArray(data) ? data : [data];
+
+            if (dataArray.length === 0) {
+                 messageDiv.textContent = 'O JSON foi analisado, mas não contém dados (array vazio ou objeto vazio).';
+                messageDiv.classList.add('bg-yellow-100', 'text-yellow-800');
+                return;
+            }
+
+            try {
+                // Chama a função recursiva, passando um ID raiz único.
+                const tableHtml = generateTableHtml(dataArray, 'root-output');
+                
+                // Renderiza a tabela principal no contêiner raiz com scroll
+                outputDiv.innerHTML = '<div class="table-container shadow-2xl rounded-xl border border-gray-700">' + tableHtml + '</div>';
+                
+                messageDiv.textContent = `Sucesso! Foram visualizados ${dataArray.length} registro(s).`;
+                messageDiv.classList.add('bg-green-100', 'text-green-800');
+
+            } catch (e) {
+                console.error("Erro ao gerar tabela:", e);
+                messageDiv.textContent = 'Erro inesperado ao gerar a tabela. Verifique o console para detalhes.';
+                messageDiv.classList.add('bg-red-100', 'text-red-800');
+            }
+        }
+
+        /**
+         * Gera o HTML da tabela recursivamente (apenas a estrutura <table>).
+         * @param {Array} dataArray - O array de objetos a ser visualizado.
+         * @param {string} parentId - Um ID único para determinar as classes de estilo.
+         * @returns {string} O HTML da tabela (<table>...</table>).
+         */
+        function generateTableHtml(dataArray, parentId) {
+            let headers = new Set();
+            dataArray.forEach(item => {
+                if (typeof item === 'object' && item !== null) {
+                    Object.keys(item).forEach(key => headers.add(key));
+                }
+            });
+
+            headers = Array.from(headers);
+            if (headers.length === 0) {
+                return '<p class="text-center text-gray-500 p-2 text-xs">Sem dados/chaves para visualizar neste nível.</p>';
+            }
+            
+            // Define cores baseadas na profundidade. Se for root-output, é o tema principal.
+            const isRoot = parentId === 'root-output';
+            const headerBgClass = isRoot ? 'bg-gray-700' : 'bg-gray-600'; 
+            const rowBg1 = isRoot ? 'bg-gray-800' : 'bg-gray-700/70';
+            const rowBg2 = isRoot ? 'bg-gray-900/50' : 'bg-gray-700/50';
+
+            // Início da Tabela
+            let tableHtml = `<table class="data-table w-full text-sm text-left text-gray-300 border-separate border-spacing-0 rounded-lg overflow-hidden">`; 
+            
+            // Cabeçalho
+            tableHtml += '<thead><tr>';
+            headers.forEach(header => {
+                tableHtml += `<th scope="col" class="font-bold uppercase tracking-wider ${headerBgClass} p-3 text-xs border-b border-gray-600">${header}</th>`;
+            });
+            tableHtml += '</tr></thead>';
+            
+            // Corpo da Tabela
+            tableHtml += '<tbody class="divide-y divide-gray-700">';
+
+            dataArray.forEach((item, rowIndex) => {
+                const rowClass = rowIndex % 2 === 0 ? rowBg1 : rowBg2;
+                tableHtml += `<tr class="${rowClass} hover:bg-gray-700 transition duration-150">`;
+
+                headers.forEach(header => {
+                    let value = item[header];
+                    let displayContent = '';
+                    let cellClass = 'align-top text-white p-3';
+                    
+                    // Tratamento de valores aninhados (Objetos ou Arrays)
+                    if (typeof value === 'object' && value !== null) {
+                        const isArray = Array.isArray(value);
+                        const complexDataArray = isArray ? value : [value];
+                        const count = isArray ? value.length : Object.keys(value).length;
+                        const typeLabel = isArray ? `Array [${count}]` : `Objeto (${count} Chaves)`;
+
+                        // 1. Stringify os dados complexos
+                        const complexJsonString = JSON.stringify(complexDataArray);
+                        
+                        // 2. URL-encode o JSON e escape o título para o onclick
+                        const encodedJson = encodeURIComponent(complexJsonString);
+                        const titleText = `${header} (${typeLabel})`;
+                        const escapedTitle = titleText.replace(/'/g, "\\'"); 
+                        
+                        // Constrói o botão que irá abrir a nova modal
+                        displayContent = `
+                            <button onclick="openModal('${encodedJson}', '${escapedTitle}')" 
+                                data-original-text="Ver Estrutura (${typeLabel})"
+                                class="text-xs font-semibold px-3 py-1 bg-blue-600 hover:bg-blue-700 rounded text-white transition duration-150 shadow-md transform hover:scale-[1.03]">
+                                Ver Estrutura (${typeLabel})
+                            </button>
+                        `;
+                        cellClass += ' max-w-sm'; 
+                    } else if (value === undefined || value === null) {
+                        displayContent = 'N/A';
+                        cellClass += ' text-gray-500 italic';
+                    } else if (typeof value === 'boolean') {
+                        displayContent = value ? 'VERDADEIRO' : 'FALSO';
+                        cellClass += value ? ' text-green-400 font-medium' : ' text-red-400 font-medium';
+                    } else {
+                        // Valores simples (string, number)
+                        let displayValue = String(value);
+                        if (displayValue.length > 50) {
+                            displayValue = displayValue.substring(0, 47) + '...';
+                        }
+                        displayContent = displayValue;
+                    }
+                    
+                    tableHtml += `<td class="${cellClass}"><div class="max-w-md">${displayContent}</div></td>`;
+                });
+                
+                tableHtml += '</tr>';
+            });
+
+            tableHtml += '</tbody></table>';
+            return tableHtml;
+        }
+    </script>
+</head>
+<!-- A classe "min-h-screen flex flex-col" garante que o body tenha altura mínima de tela e use Flexbox para o layout sticky-footer -->
+<body class="min-h-screen flex flex-col">
+
+    <!-- Conteúdo Principal - Usando p-8 e flex-grow para ocupar o espaço restante -->
+    <div class="p-8 flex-grow">
+        <div class="max-w-6xl mx-auto">
+            <h1 class="text-4xl font-extrabold text-white mb-6 text-center">
+                Conversor JSON para Tabela (Visualização Recursiva por Modal)
+            </h1>
+            <p class="text-gray-400 mb-8 text-center">
+                Cole o seu JSON. Objetos e listas aninhados abrem uma nova janela (modal) com sua própria tabela, permitindo a navegação em profundidade.
+            </p>
+
+            <!-- Área de Input e Ação -->
+            <div class="bg-gray-700 p-6 rounded-xl shadow-lg mb-6">
+                <textarea id="json-input" rows="10" 
+                        class="w-full p-4 bg-gray-900 text-gray-200 border border-gray-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 transition duration-150"
+                        placeholder='Cole seu JSON aqui. Ex: [{"id": 1, "nome": "Luan", "pedidos": [{"item": "café", "qnt": 2, "detalhes": {"origem": "BR"}}, {"item": "pão", "qnt": 1}]}]'></textarea>
+                
+                <button id="process-button" 
+                        class="mt-4 w-full sm:w-auto px-6 py-3 text-lg font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-md transition duration-200 transform hover:scale-[1.01] focus:outline-none focus:ring-4 focus:ring-blue-500 focus:ring-opacity-50">
+                    Visualizar Tabela
+                </button>
+            </div>
+
+            <!-- Área de Mensagens (Erros/Sucesso) -->
+            <div id="message"></div>
+
+            <!-- Área de Saída da Tabela Principal -->
+            <div id="output" class="mt-8">
+                <!-- A tabela principal gerada aparecerá aqui -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Contêiner de Pilha de Modais - Fixo no topo do Z-Index -->
+    <div id="modal-stack" class="fixed inset-0 z-50 pointer-events-none">
+        <!-- Modais serão anexadas aqui, sobrepondo o conteúdo principal -->
+    </div>
+
+    <!-- Rodapé (Footer) - Posicionado no final pelo 'flex-col' do body -->
+    <footer class="bg-gray-900 text-gray-400 text-center text-sm p-4 w-full border-t border-gray-700 shadow-xl">
+        Criado por KabuSolutions - 2025
+    </footer>
+</body>
+</html>
